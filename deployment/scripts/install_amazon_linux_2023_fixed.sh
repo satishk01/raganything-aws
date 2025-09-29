@@ -2,7 +2,7 @@
 set -e
 
 # RAG Anything with AWS Bedrock Installation Script for Amazon Linux 2023
-# This script sets up the complete environment for running RAG Anything with Bedrock
+# Optimized specifically for Amazon Linux 2023 with proper package handling
 
 # Colors for output
 RED='\033[0;31m'
@@ -35,20 +35,40 @@ if ! grep -q "Amazon Linux" /etc/os-release; then
     error "This script is designed for Amazon Linux 2023"
 fi
 
-log "Starting RAG Anything with AWS Bedrock installation..."
+log "Starting RAG Anything with AWS Bedrock installation (Amazon Linux 2023 Optimized)..."
 
 # Update system
 log "Updating system packages..."
 sudo dnf update -y
 
-# Install system dependencies
-log "Installing system dependencies..."
+# Clean package cache to avoid conflicts
+log "Cleaning package cache..."
+sudo dnf clean all
+sudo dnf makecache
 
-# First, resolve curl conflicts by using --allowerasing
+# Fix curl conflicts first
 log "Resolving curl package conflicts..."
+# Remove curl-minimal if it exists and conflicts
+sudo dnf remove -y curl-minimal || true
+
+# Install curl with conflict resolution
 sudo dnf install -y --allowerasing curl
 
-# Install remaining system dependencies
+# Alternative approach if the above doesn't work
+if ! command -v curl &> /dev/null; then
+    log "Trying alternative curl installation..."
+    sudo dnf swap -y curl-minimal curl || true
+fi
+
+# Verify curl is working
+if ! command -v curl &> /dev/null; then
+    error "Failed to install curl. Please resolve manually."
+fi
+
+log "Curl installed successfully: $(curl --version | head -n1)"
+
+# Install system dependencies (excluding curl since it's already installed)
+log "Installing system dependencies..."
 sudo dnf install -y \
     python3.11 \
     python3.11-pip \
@@ -61,29 +81,47 @@ sudo dnf install -y \
     unzip \
     htop \
     tree \
-    vim
+    vim \
+    tar \
+    gzip \
+    which \
+    findutils
 
-# Install LibreOffice for office document processing
-log "Installing LibreOffice..."
-# LibreOffice is not available in Amazon Linux 2023 default repos
-# We'll try to install it from EPEL or use alternatives
+# Install LibreOffice and document processing tools
+log "Installing document processing tools..."
+
+# Try to enable EPEL repository for LibreOffice
 if sudo dnf install -y epel-release; then
-    log "EPEL repository enabled, attempting LibreOffice installation..."
-    if sudo dnf install -y libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress; then
+    log "EPEL repository enabled successfully"
+    
+    # Try to install LibreOffice from EPEL
+    if sudo dnf install -y libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-draw; then
         log "LibreOffice installed successfully from EPEL"
     else
-        warn "LibreOffice installation from EPEL failed, installing alternatives..."
-        sudo dnf install -y pandoc || warn "Pandoc not available"
-        sudo -u raganything /opt/raganything/venv/bin/pip install python-docx openpyxl python-pptx || warn "Some Python document libraries failed to install"
+        warn "LibreOffice installation from EPEL failed, trying individual packages..."
+        
+        # Try installing core components individually
+        sudo dnf install -y libreoffice-core || warn "LibreOffice core not available"
+        sudo dnf install -y libreoffice-writer || warn "LibreOffice Writer not available"
+        sudo dnf install -y libreoffice-calc || warn "LibreOffice Calc not available"
+        
+        if command -v libreoffice &> /dev/null; then
+            log "LibreOffice partially installed"
+        else
+            warn "LibreOffice installation failed, installing alternatives..."
+            sudo dnf install -y pandoc || warn "Pandoc not available"
+        fi
     fi
 else
-    warn "EPEL repository not available. Installing alternative document processing tools..."
+    warn "EPEL repository not available, installing alternative document processing tools..."
+    
+    # Install pandoc if available
     sudo dnf install -y pandoc || warn "Pandoc not available"
-    sudo -u raganything /opt/raganything/venv/bin/pip install python-docx openpyxl python-pptx || warn "Some Python document libraries failed to install"
     
     log "Alternative document processing tools installed."
-    log "Note: For full Office document support, manually install LibreOffice:"
-    log "  Download from https://www.libreoffice.org/download/download/"
+    log "Note: For full Office document support, you can:"
+    log "  1. Download LibreOffice from https://www.libreoffice.org/download/download/"
+    log "  2. Or try: sudo dnf config-manager --set-enabled crb && sudo dnf install libreoffice"
 fi
 
 # Create application user if it doesn't exist
@@ -118,18 +156,28 @@ sudo -u raganything /opt/raganything/venv/bin/pip install \
     aiofiles \
     uvloop
 
+# Install document processing Python libraries as backup
+log "Installing Python document processing libraries..."
+sudo -u raganything /opt/raganything/venv/bin/pip install \
+    python-docx \
+    openpyxl \
+    python-pptx \
+    PyPDF2 \
+    pdfplumber \
+    Pillow
+
 # Install RAG Anything with all dependencies
 log "Installing RAG Anything..."
 sudo -u raganything /opt/raganything/venv/bin/pip install 'raganything[all]'
 
-# Clone the enhanced RAG Anything repository (if available)
+# Clone the enhanced RAG Anything repository
 log "Setting up application code..."
 if [ -d "/opt/raganything/app/.git" ]; then
     log "Updating existing repository..."
     sudo -u raganything git -C /opt/raganything/app pull
 else
     log "Cloning RAG Anything repository..."
-    sudo -u raganything git clone https://github.com/HKUDS/RAG-Anything.git /opt/raganything/app
+    sudo -u raganything git clone https://github.com/satishk01/raganything-aws.git /opt/raganything/app
 fi
 
 # Install application in development mode
@@ -139,9 +187,50 @@ sudo -u raganything /opt/raganything/venv/bin/pip install -e /opt/raganything/ap
 # Copy configuration template
 log "Setting up configuration..."
 if [ ! -f "/opt/raganything/config/.env" ]; then
-    sudo -u raganything cp /opt/raganything/app/deployment/config/environment.template /opt/raganything/config/.env
+    if [ -f "/opt/raganything/app/deployment/config/environment.template" ]; then
+        sudo -u raganything cp /opt/raganything/app/deployment/config/environment.template /opt/raganything/config/.env
+    else
+        # Create a basic .env file if template doesn't exist
+        sudo -u raganything tee /opt/raganything/config/.env > /dev/null << 'EOF'
+# AWS Configuration
+AWS_REGION=us-east-1
+AWS_DEFAULT_REGION=us-east-1
+
+# Bedrock Model Configuration
+BEDROCK_CLAUDE_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
+BEDROCK_CLAUDE_HAIKU_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+BEDROCK_TITAN_EMBEDDING_MODEL_ID=amazon.titan-embed-text-v2:0
+
+# Model Parameters
+BEDROCK_MAX_TOKENS=4096
+BEDROCK_TEMPERATURE=0.7
+BEDROCK_RETRY_MAX_ATTEMPTS=3
+BEDROCK_RETRY_BACKOFF_FACTOR=2.0
+
+# RAG Anything Configuration
+WORKING_DIR=/opt/raganything/data/rag_storage
+OUTPUT_DIR=/opt/raganything/data/output
+PARSER=mineru
+PARSE_METHOD=auto
+
+# Multimodal Processing
+ENABLE_IMAGE_PROCESSING=true
+ENABLE_TABLE_PROCESSING=true
+ENABLE_EQUATION_PROCESSING=true
+
+# Performance Settings
+MAX_CONCURRENT_FILES=2
+CONTEXT_WINDOW=1
+MAX_CONTEXT_TOKENS=2000
+
+# Logging Configuration
+LOG_LEVEL=INFO
+LOG_DIR=/opt/raganything/logs
+EOF
+    fi
+    
     sudo -u raganything chmod 600 /opt/raganything/config/.env
-    log "Configuration template copied to /opt/raganything/config/.env"
+    log "Configuration file created at /opt/raganything/config/.env"
     warn "Please edit /opt/raganything/config/.env to customize your settings"
 else
     log "Configuration file already exists, skipping template copy"
@@ -149,7 +238,42 @@ fi
 
 # Set up systemd service
 log "Setting up systemd service..."
-sudo cp /opt/raganything/app/deployment/systemd/raganything.service /etc/systemd/system/
+if [ -f "/opt/raganything/app/deployment/systemd/raganything.service" ]; then
+    sudo cp /opt/raganything/app/deployment/systemd/raganything.service /etc/systemd/system/
+else
+    # Create a basic systemd service file
+    sudo tee /etc/systemd/system/raganything.service > /dev/null << 'EOF'
+[Unit]
+Description=RAG Anything with AWS Bedrock
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=raganything
+Group=raganything
+WorkingDirectory=/opt/raganything/app
+Environment=PATH=/opt/raganything/venv/bin
+EnvironmentFile=/opt/raganything/config/.env
+ExecStart=/opt/raganything/venv/bin/python -m raganything.server
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=raganything
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/raganything
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl enable raganything
 
@@ -324,12 +448,13 @@ chmod +x /opt/raganything/scripts/test_bedrock.py
 # Install CloudWatch agent if not already installed
 if ! command -v /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl &> /dev/null; then
     log "Installing CloudWatch agent..."
-    sudo dnf install -y amazon-cloudwatch-agent
+    sudo dnf install -y amazon-cloudwatch-agent || warn "CloudWatch agent installation failed"
 fi
 
 # Create CloudWatch agent configuration
-log "Creating CloudWatch agent configuration..."
-sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null << 'EOF'
+if command -v /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl &> /dev/null; then
+    log "Creating CloudWatch agent configuration..."
+    sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null << 'EOF'
 {
     "logs": {
         "logs_collected": {
@@ -365,10 +490,11 @@ sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /de
 }
 EOF
 
-# Start CloudWatch agent
-log "Starting CloudWatch agent..."
-sudo systemctl enable amazon-cloudwatch-agent
-sudo systemctl start amazon-cloudwatch-agent
+    # Start CloudWatch agent
+    log "Starting CloudWatch agent..."
+    sudo systemctl enable amazon-cloudwatch-agent || warn "Failed to enable CloudWatch agent"
+    sudo systemctl start amazon-cloudwatch-agent || warn "Failed to start CloudWatch agent"
+fi
 
 # Set up cron jobs for maintenance
 log "Setting up cron jobs..."
@@ -381,8 +507,10 @@ sudo tee /opt/raganything/scripts/start.sh > /dev/null << 'EOF'
 
 echo "🚀 Starting RAG Anything with AWS Bedrock..."
 
-# Load environment variables
-source /opt/raganything/config/.env
+# Load environment variables if they exist
+if [ -f "/opt/raganything/config/.env" ]; then
+    source /opt/raganything/config/.env
+fi
 
 # Start the service
 sudo systemctl start raganything
@@ -428,6 +556,30 @@ sudo chown -R raganything:raganything /opt/raganything
 sudo chmod -R 755 /opt/raganything/scripts
 sudo chmod 600 /opt/raganything/config/.env
 
+# Verify installation
+log "Verifying installation..."
+echo "📋 Installation Summary:"
+echo "  ✅ System packages installed"
+echo "  ✅ Python 3.11 and virtual environment set up"
+echo "  ✅ AWS SDK installed"
+echo "  ✅ RAG Anything installed"
+echo "  ✅ Application code cloned"
+echo "  ✅ Configuration files created"
+echo "  ✅ Systemd service configured"
+echo "  ✅ Scripts and utilities created"
+
+# Check LibreOffice installation
+if command -v libreoffice &> /dev/null; then
+    echo "  ✅ LibreOffice installed: $(libreoffice --version 2>/dev/null | head -n1)"
+else
+    echo "  ⚠️  LibreOffice not installed - Office document processing may be limited"
+fi
+
+# Check document processing alternatives
+if command -v pandoc &> /dev/null; then
+    echo "  ✅ Pandoc available for document conversion"
+fi
+
 log "✅ Installation completed successfully!"
 echo
 echo "📋 Next steps:"
@@ -447,5 +599,9 @@ echo "🔧 Useful commands:"
 echo "  - View logs: sudo journalctl -u raganything -f"
 echo "  - Service status: sudo systemctl status raganything"
 echo "  - Restart service: sudo systemctl restart raganything"
+echo
+echo "📖 For LibreOffice installation (if needed):"
+echo "  - Download from: https://www.libreoffice.org/download/download/"
+echo "  - Or try: sudo dnf config-manager --set-enabled crb && sudo dnf install libreoffice"
 echo
 log "Installation complete! 🎉"

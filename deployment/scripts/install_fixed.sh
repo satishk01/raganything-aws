@@ -80,7 +80,24 @@ sudo dnf install -y \
 
 # Install LibreOffice for office document processing
 log "Installing LibreOffice..."
-sudo dnf install -y libreoffice
+# LibreOffice is not available in Amazon Linux 2023 default repos
+# We'll try to install it from EPEL or use alternatives
+if sudo dnf install -y epel-release; then
+    log "EPEL repository enabled, attempting LibreOffice installation..."
+    if sudo dnf install -y libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress; then
+        log "LibreOffice installed successfully from EPEL"
+    else
+        warn "LibreOffice installation from EPEL failed, installing alternatives..."
+        sudo dnf install -y pandoc || warn "Pandoc not available"
+    fi
+else
+    warn "EPEL repository not available. Installing alternative document processing tools..."
+    sudo dnf install -y pandoc || warn "Pandoc not available"
+    
+    log "Alternative document processing tools installed."
+    log "Note: For full Office document support, manually install LibreOffice:"
+    log "  Download from https://www.libreoffice.org/download/download/"
+fi
 
 # Create application user if it doesn't exist
 if ! id "raganything" &>/dev/null; then
