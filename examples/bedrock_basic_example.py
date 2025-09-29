@@ -15,11 +15,26 @@ import sys
 from pathlib import Path
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-from raganything.bedrock_rag import BedrockRAGAnything
-from raganything import RAGAnythingConfig
-from raganything.bedrock import BedrockConfig
+# Load environment variables
+try:
+    from dotenv import load_dotenv
+    load_dotenv(project_root / '.env')
+except ImportError:
+    print("Warning: python-dotenv not installed, using system environment variables")
+
+try:
+    from raganything.bedrock_rag import BedrockRAGAnything
+    from raganything import RAGAnythingConfig
+    from raganything.bedrock import BedrockConfig
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    print("Please make sure you have installed the dependencies:")
+    print("  pip install lightrag boto3 python-dotenv")
+    print("  pip install -e .")
+    sys.exit(1)
 
 
 async def basic_bedrock_example():
