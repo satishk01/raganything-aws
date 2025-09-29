@@ -1,0 +1,50 @@
+[Unit]
+Description=RAG Anything with AWS Bedrock
+Documentation=https://github.com/HKUDS/RAG-Anything
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=raganything
+Group=raganything
+WorkingDirectory=/opt/raganything/app
+Environment=PATH=/opt/raganything/venv/bin
+EnvironmentFile=/opt/raganything/config/.env
+
+# Main service command
+ExecStart=/opt/raganything/venv/bin/python -m raganything.server
+
+# Restart configuration
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Output configuration
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=raganything
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/raganything/data /opt/raganything/logs /opt/raganything/cache
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Health check
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

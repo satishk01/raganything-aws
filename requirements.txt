@@ -1,0 +1,21 @@
+huggingface_hub
+# LightRAG packages
+lightrag-hku
+# MinerU 2.0 packages (replaces magic-pdf)
+mineru[core]
+# Progress bars for batch processing
+tqdm
+# AWS Bedrock integration dependencies
+boto3>=1.34.0
+botocore>=1.34.0
+python-dotenv>=1.0.0
+asyncio-throttle>=1.0.0
+tenacity>=8.0.0
+# Note: Optional dependencies are now defined in setup.py extras_require:
+# - [image]: Pillow>=10.0.0 (for BMP, TIFF, GIF, WebP format conversion)
+# - [text]: reportlab>=4.0.0 (for TXT, MD to PDF conversion)
+# - [office]: requires LibreOffice (external program, not Python package)
+# - [bedrock]: boto3, botocore, python-dotenv, asyncio-throttle, tenacity (for AWS Bedrock integration)
+# - [all]: includes all optional dependencies
+#
+# Install with: pip install raganything[bedrock] or pip install raganything[all]

@@ -1,0 +1,288 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Infrastructure for RAG Anything with AWS Bedrock integration'
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.large
+    AllowedValues:
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - m5.large
+      - m5.xlarge
+      - m5.2xlarge
+    Description: EC2 instance type for RAG Anything application
+    
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to enable SSH access
+    
+  AllowedSSHCIDR:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: CIDR block allowed to SSH to the instance
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'
+    
+  VolumeSize:
+    Type: Number
+    Default: 50
+    MinValue: 20
+    MaxValue: 1000
+    Description: Size of the EBS volume in GB
+    
+  Environment:
+    Type: String
+    Default: development
+    AllowedValues:
+      - development
+      - staging
+      - production
+    Description: Environment name
+
+Resources:
+  # IAM Role for EC2 Instance
+  RAGAnythingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'RAGAnything-BedrockRole-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub 'RAGAnything-BedrockRole-${Environment}'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # IAM Policy for Bedrock Access
+  BedrockAccessPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub 'RAGAnything-BedrockPolicy-${Environment}'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+            Resource:
+              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0'
+              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-haiku-20240307-v1:0'
+              - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v2:0'
+          - Effect: Allow
+            Action:
+              - bedrock:ListFoundationModels
+              - bedrock:GetFoundationModel
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogStreams
+            Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ec2/raganything*'
+      Roles:
+        - !Ref RAGAnythingRole
+
+  # Instance Profile
+  RAGAnythingInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub 'RAGAnything-InstanceProfile-${Environment}'
+      Roles:
+        - !Ref RAGAnythingRole
+
+  # Security Group
+  RAGAnythingSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub 'RAGAnything-SG-${Environment}'
+      GroupDescription: Security group for RAG Anything application
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedSSHCIDR
+          Description: SSH access
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS access
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+          Description: Application port
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: All outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub 'RAGAnything-SG-${Environment}'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # EC2 Instance
+  RAGAnythingInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64}}'
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPairName
+      IamInstanceProfile: !Ref RAGAnythingInstanceProfile
+      SecurityGroupIds:
+        - !Ref RAGAnythingSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref VolumeSize
+            DeleteOnTermination: true
+            Encrypted: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          
+          # Install CloudWatch agent
+          yum install -y amazon-cloudwatch-agent
+          
+          # Create application user
+          useradd -m -s /bin/bash raganything
+          
+          # Create directories
+          mkdir -p /opt/raganything/{app,config,logs,data,cache,scripts}
+          chown -R raganything:raganything /opt/raganything
+          
+          # Install system dependencies
+          yum install -y python3.11 python3.11-pip python3.11-devel git gcc gcc-c++ make wget curl unzip libreoffice
+          
+          # Set up Python environment
+          sudo -u raganything python3.11 -m venv /opt/raganything/venv
+          sudo -u raganything /opt/raganything/venv/bin/pip install --upgrade pip setuptools wheel
+          
+          # Install AWS SDK and RAG Anything
+          sudo -u raganything /opt/raganything/venv/bin/pip install boto3 botocore python-dotenv asyncio-throttle tenacity
+          sudo -u raganything /opt/raganything/venv/bin/pip install 'raganything[all]'
+          
+          # Create environment file
+          cat > /opt/raganything/config/.env << 'EOF'
+          AWS_REGION=${AWS::Region}
+          AWS_DEFAULT_REGION=${AWS::Region}
+          BEDROCK_CLAUDE_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
+          BEDROCK_CLAUDE_HAIKU_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+          BEDROCK_TITAN_EMBEDDING_MODEL_ID=amazon.titan-embed-text-v2:0
+          BEDROCK_MAX_TOKENS=4096
+          BEDROCK_TEMPERATURE=0.7
+          WORKING_DIR=/opt/raganything/data/rag_storage
+          OUTPUT_DIR=/opt/raganything/data/output
+          PARSER=mineru
+          PARSE_METHOD=auto
+          ENABLE_IMAGE_PROCESSING=true
+          ENABLE_TABLE_PROCESSING=true
+          ENABLE_EQUATION_PROCESSING=true
+          LOG_LEVEL=INFO
+          LOG_DIR=/opt/raganything/logs
+          EOF
+          
+          chown raganything:raganything /opt/raganything/config/.env
+          chmod 600 /opt/raganything/config/.env
+          
+          # Signal completion
+          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource RAGAnythingInstance --region ${AWS::Region}
+          
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT15M
+    
+    Tags:
+      - Key: Name
+        Value: !Sub 'RAGAnything-Bedrock-${Environment}'
+      - Key: Environment
+        Value: !Ref Environment
+
+  # CloudWatch Log Group
+  RAGAnythingLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/ec2/raganything-${Environment}'
+      RetentionInDays: 14
+
+  # S3 Bucket for document storage (optional)
+  DocumentStorageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'raganything-documents-${Environment}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Name
+          Value: !Sub 'RAGAnything-Documents-${Environment}'
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+  InstanceId:
+    Description: Instance ID of the RAG Anything server
+    Value: !Ref RAGAnythingInstance
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceId'
+      
+  InstancePublicIP:
+    Description: Public IP address of the RAG Anything server
+    Value: !GetAtt RAGAnythingInstance.PublicIp
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicIP'
+      
+  InstancePrivateIP:
+    Description: Private IP address of the RAG Anything server
+    Value: !GetAtt RAGAnythingInstance.PrivateIp
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateIP'
+      
+  SecurityGroupId:
+    Description: Security Group ID
+    Value: !Ref RAGAnythingSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroupId'
+      
+  IAMRoleArn:
+    Description: IAM Role ARN
+    Value: !GetAtt RAGAnythingRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-IAMRoleArn'
+      
+  S3BucketName:
+    Description: S3 Bucket for document storage
+    Value: !Ref DocumentStorageBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-S3BucketName'
+      
+  SSHCommand:
+    Description: SSH command to connect to the instance
+    Value: !Sub 'ssh -i ${KeyPairName}.pem ec2-user@${RAGAnythingInstance.PublicIp}'

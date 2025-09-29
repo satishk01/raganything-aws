@@ -1,0 +1,64 @@
+# RAG Anything with AWS Bedrock Configuration Template
+# Copy this file to /opt/raganything/config/.env and customize as needed
+
+# AWS Configuration
+AWS_REGION=us-east-1
+AWS_DEFAULT_REGION=us-east-1
+
+# Bedrock Model Configuration
+BEDROCK_CLAUDE_MODEL_ID=anthropic.claude-3-5-sonnet-20241022-v2:0
+BEDROCK_CLAUDE_HAIKU_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+BEDROCK_TITAN_EMBEDDING_MODEL_ID=amazon.titan-embed-text-v2:0
+
+# Model Parameters
+BEDROCK_MAX_TOKENS=4096
+BEDROCK_TEMPERATURE=0.7
+BEDROCK_RETRY_MAX_ATTEMPTS=3
+BEDROCK_RETRY_BACKOFF_FACTOR=2.0
+
+# RAG Anything Configuration
+WORKING_DIR=/opt/raganything/data/rag_storage
+OUTPUT_DIR=/opt/raganything/data/output
+PARSER=mineru
+PARSE_METHOD=auto
+
+# Multimodal Processing
+ENABLE_IMAGE_PROCESSING=true
+ENABLE_TABLE_PROCESSING=true
+ENABLE_EQUATION_PROCESSING=true
+
+# Performance Settings
+MAX_CONCURRENT_FILES=2
+CONTEXT_WINDOW=1
+MAX_CONTEXT_TOKENS=2000
+
+# Caching Configuration
+ENABLE_LLM_CACHE=true
+CACHE_MAX_SIZE=1000
+CACHE_TTL=3600
+
+# Logging Configuration
+LOG_LEVEL=INFO
+LOG_DIR=/opt/raganything/logs
+LOG_MAX_BYTES=10485760
+LOG_BACKUP_COUNT=5
+VERBOSE=false
+
+# Server Configuration (if running web server)
+SERVER_HOST=0.0.0.0
+SERVER_PORT=8000
+SERVER_WORKERS=1
+
+# Security Settings
+ALLOWED_HOSTS=localhost,127.0.0.1
+CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+
+# Optional: S3 Configuration for document storage
+# S3_BUCKET_NAME=raganything-documents
+# S3_PREFIX=documents/
+
+# Optional: Database Configuration (if using external database)
+# DATABASE_URL=postgresql://user:password@localhost:5432/raganything
+
+# Optional: Redis Configuration (for distributed caching)
+# REDIS_URL=redis://localhost:6379/0
