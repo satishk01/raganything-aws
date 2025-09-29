@@ -5,8 +5,13 @@ AWS Bedrock configuration management
 import os
 from dataclasses import dataclass, field
 from typing import List, Optional
-from lightrag.utils import get_env_value
 from .exceptions import BedrockConfigurationError
+
+# Import compatibility layer
+try:
+    from lightrag.utils import get_env_value
+except ImportError:
+    from ..compat import get_env_value
 
 
 @dataclass
