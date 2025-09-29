@@ -2,7 +2,7 @@
 set -e
 
 # RAG Anything with AWS Bedrock Installation Script for Amazon Linux 2023
-# This script sets up the complete environment for running RAG Anything with Bedrock
+# Fixed version that handles curl package conflicts
 
 # Colors for output
 RED='\033[0;31m'
@@ -35,20 +35,35 @@ if ! grep -q "Amazon Linux" /etc/os-release; then
     error "This script is designed for Amazon Linux 2023"
 fi
 
-log "Starting RAG Anything with AWS Bedrock installation..."
+log "Starting RAG Anything with AWS Bedrock installation (Fixed Version)..."
 
 # Update system
 log "Updating system packages..."
 sudo dnf update -y
 
-# Install system dependencies
-log "Installing system dependencies..."
-
-# First, resolve curl conflicts by using --allowerasing
+# Fix curl conflicts first
 log "Resolving curl package conflicts..."
+# Remove curl-minimal if it exists and conflicts
+sudo dnf remove -y curl-minimal || true
+
+# Install curl with conflict resolution
 sudo dnf install -y --allowerasing curl
 
-# Install remaining system dependencies
+# Alternative approach if the above doesn't work
+if ! command -v curl &> /dev/null; then
+    log "Trying alternative curl installation..."
+    sudo dnf swap -y curl-minimal curl
+fi
+
+# Verify curl is working
+if ! command -v curl &> /dev/null; then
+    error "Failed to install curl. Please resolve manually."
+fi
+
+log "Curl installed successfully: $(curl --version | head -n1)"
+
+# Install system dependencies (excluding curl since it's already installed)
+log "Installing system dependencies..."
 sudo dnf install -y \
     python3.11 \
     python3.11-pip \
@@ -103,14 +118,14 @@ sudo -u raganything /opt/raganything/venv/bin/pip install \
 log "Installing RAG Anything..."
 sudo -u raganything /opt/raganything/venv/bin/pip install 'raganything[all]'
 
-# Clone the enhanced RAG Anything repository (if available)
+# Clone the enhanced RAG Anything repository
 log "Setting up application code..."
 if [ -d "/opt/raganything/app/.git" ]; then
     log "Updating existing repository..."
     sudo -u raganything git -C /opt/raganything/app pull
 else
     log "Cloning RAG Anything repository..."
-    sudo -u raganything git clone https://github.com/HKUDS/RAG-Anything.git /opt/raganything/app
+    sudo -u raganything git clone https://github.com/satishk01/raganything-aws.git /opt/raganything/app
 fi
 
 # Install application in development mode
